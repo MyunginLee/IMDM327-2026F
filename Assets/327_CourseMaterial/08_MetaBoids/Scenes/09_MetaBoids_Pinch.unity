@@ -561,17 +561,17 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 33fa7d5d03e94624bbdebcacdd9a67bb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: IMDM327.MetaBoids::IMDM327.MetaBoids.MetaBoidsController
-  boidCount: 2000
-  separation: 1.4
-  alignment: 0.8
-  cohesion: 0.9
-  neighborRadius: 0.18
-  separationRadius: 0.045
-  maxSpeed: 0.16
+  boidCount: 128
+  separation: 1.48
+  alignment: 1.53
+  cohesion: 1.51
+  neighborRadius: 0.165
+  separationRadius: 0.0735
+  maxSpeed: 0.4
   mode: 2
   radius: 0.018
   threshold: 1.5
-  edgeWidth: 0.035
+  edgeWidth: 0.1251
   showCenters: 0
   showGrid: 0
   paused: 0
