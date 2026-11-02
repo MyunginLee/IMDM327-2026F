@@ -1,0 +1,111 @@
+/*
+ * MOVEMENT: one GPU thread updates one boid.
+ * Read old data -> find neighbors -> steer -> write new data.
+ * Rules: https://www.red3d.com/cwr/boids/
+ * Video: https://www.youtube.com/watch?v=1rOinLsyXAA
+ */
+#pragma kernel Simulate
+
+/*
+ * SHARED DATA
+ * A float4 stores (position X, position Y, velocity X, velocity Y).
+ * C# sends the settings below before calling Dispatch.
+ */
+StructuredBuffer<float4> _ReadBoids;
+RWStructuredBuffer<float4> _WriteBoids;
+int _BoidCount;
+float _DeltaTime, _MaxSpeed, _NeighborRadius, _SeparationRadius;
+float2 _FieldSize;
+float4 _Weights; // separation, alignment, cohesion
+float4 _LeftPinch, _RightPinch; // UV.xy and pull strength.z; zero means no pull.
+
+float2 PinchForce(float2 position, float4 hand)
+{
+    float2 towardHand = (hand.xy - position) * _FieldSize;
+    return towardHand / max(length(towardHand), 0.05) * hand.z;
+}
+
+float2 Limit(float2 value, float maximum)
+{
+    // Keep the direction, but shorten a vector that is too long.
+    return value * min(1.0, maximum / max(length(value), 0.00001));
+}
+
+[numthreads(64, 1, 1)]
+void Simulate(uint3 id : SV_DispatchThreadID)
+{
+    /*
+     * 1. READ THIS BOID
+     * The thread ID is its array index. Extra threads do nothing.
+     */
+    uint i = id.x;
+    if (i >= (uint)_BoidCount) return;
+    float2 position = _ReadBoids[i].xy;
+    float2 velocity = _ReadBoids[i].zw;
+    float2 separation = 0.0;
+    float2 averageVelocity = 0.0;
+    float2 averagePosition = 0.0;
+    int neighbors = 0;
+    int closeNeighbors = 0;
+
+    /*
+     * 2. LOOK AT NEARBY BOIDS
+     * Add their positions and velocities. Push away from very close ones.
+     * Scaling X by the window aspect keeps screen distances consistent.
+     */
+    for (int j = 0; j < _BoidCount; j++)
+    {
+        if (j == (int)i) continue;
+        float2 offset = (_ReadBoids[j].xy - position) * _FieldSize;
+        float distanceSquared = dot(offset, offset);
+        if (distanceSquared < _NeighborRadius * _NeighborRadius)
+        {
+            averagePosition += _ReadBoids[j].xy;
+            averageVelocity += _ReadBoids[j].zw;
+            neighbors++;
+        }
+        if (distanceSquared < _SeparationRadius * _SeparationRadius)
+        {
+            separation -= offset / max(distanceSquared, 0.0001);
+            closeNeighbors++;
+        }
+    }
+
+    /*
+     * 3. COMBINE THREE RULES
+     * Separation: move apart. Alignment: match velocity.
+     * Cohesion: move toward the average neighbor position.
+     */
+    float2 alignment = 0.0;
+    float2 cohesion = 0.0;
+    if (closeNeighbors > 0) separation = Limit(separation / closeNeighbors, 1.0);
+    if (neighbors > 0)
+    {
+        alignment = (averageVelocity / neighbors - velocity) / max(_MaxSpeed, 0.001);
+        cohesion = (averagePosition / neighbors - position) * _FieldSize / _NeighborRadius;
+    }
+    float2 acceleration = separation * _Weights.x + alignment * _Weights.y + cohesion * _Weights.z;
+
+    /*
+     * 4. TURN AWAY FROM WALLS
+     * This extra force keeps the flock inside the field.
+     */
+    acceleration += (max(0.10 - position, 0.0) - max(position - 0.90, 0.0)) * _FieldSize * 18.0;
+
+    // The second scene adds two hand forces. The basic scene sends zeros.
+    acceleration += PinchForce(position, _LeftPinch) + PinchForce(position, _RightPinch);
+
+    /*
+     * 5. MOVE AND WRITE
+     * Acceleration changes velocity. Velocity changes position.
+     * Write to the OTHER buffer so all threads read the same old frame.
+     */
+    velocity = Limit(velocity + Limit(acceleration, 3.0) * _DeltaTime, _MaxSpeed);
+    position += velocity * _DeltaTime / _FieldSize;
+
+    // Hard guard keeps every center visible even at extreme slider settings.
+    if (position.x < 0.025 || position.x > 0.975) velocity.x = -velocity.x;
+    if (position.y < 0.025 || position.y > 0.975) velocity.y = -velocity.y;
+    position = clamp(position, 0.025, 0.975);
+    _WriteBoids[i] = float4(position, velocity);
+}

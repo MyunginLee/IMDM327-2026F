@@ -24,14 +24,35 @@ namespace IMDM327.EDMBoids
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
             if (pass == null || renderingData.cameraData.cameraType != CameraType.Game) return;
-            EDMReactiveCamera camera = renderingData.cameraData.camera.GetComponent<EDMReactiveCamera>();
-            if (camera == null || !camera.isActiveAndEnabled) return;
-            if (!camera.afterimage)
+            Camera camera = renderingData.cameraData.camera;
+            ScreenAfterimage settings = camera.GetComponent<ScreenAfterimage>();
+            EDMReactiveCamera edm = camera.GetComponent<EDMReactiveCamera>();
+            bool enabled;
+            float seconds;
+            if (settings != null && settings.isActiveAndEnabled)
+            {
+                enabled = settings.afterimage;
+                seconds = settings.afterimageSeconds;
+            }
+            else if (edm != null && edm.isActiveAndEnabled)
+            {
+                enabled = edm.afterimage;
+                seconds = edm.afterimageSeconds;
+            }
+            else return;
+
+            // A different camera starts with an empty history.
+            if (pass.owner != camera)
+            {
+                pass.Dispose();
+                pass.owner = camera;
+            }
+            if (!enabled)
             {
                 pass.Dispose();
                 return;
             }
-            pass.seconds = camera.afterimageSeconds;
+            pass.seconds = seconds;
             renderer.EnqueuePass(pass);
         }
 
@@ -43,6 +64,7 @@ namespace IMDM327.EDMBoids
 
         class AfterimagePass : ScriptableRenderPass
         {
+            public Camera owner;
             public float seconds;
             Material material;
             RTHandle history;
@@ -58,7 +80,8 @@ namespace IMDM327.EDMBoids
             {
                 material = value;
                 renderPassEvent = RenderPassEvent.AfterRenderingPostProcessing;
-                ConfigureInput(ScriptableRenderPassInput.Color);
+                // We sample camera color, so URP must use a texture, not the backbuffer.
+                requiresIntermediateTexture = true;
             }
 
             public override void RecordRenderGraph(RenderGraph graph, ContextContainer frameData)
